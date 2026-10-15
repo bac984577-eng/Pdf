@@ -1,39 +1,3 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# 🚀 StarNote — Android Full Build Workflow (GitHub Actions)
-# ═══════════════════════════════════════════════════════════════════════════════
-#
-# هذا الملف يبني تطبيق StarNote الكامل للأندرويد تلقائياً على GitHub
-#
-# ✅ ما يفعله:
-#   1. بناء تطبيق الويب (Next.js) بجودة عالية
-#   2. تجميع مشروع الأندرويد عبر Capacitor أو مشروع أصلي
-#   3. إنشاء APK (Debug + Release)
-#   4. إنشاء AAB للـ Google Play Store
-#   5. توقيع تلقائي (اختياري)
-#   6. رفع الملفات لـ Release على GitHub
-#
-# 📋 المتطلبات:
-#   • مستودع GitHub مع هذا الملف في: .github/workflows/android.yml
-#   • Java 17 JDK (تثبيت تلقائي)
-#   • Android SDK (تثبيت تلقائي)
-#
-# 🔐 الأسرار الاختيارية (Settings → Secrets → Actions):
-#   • ANDROID_KEYSTORE_BASE64     (base64 من ملف .jks)
-#   • ANDROID_KEYSTORE_PASSWORD   (كلمة مرور Keystore)
-#   • ANDROID_KEY_ALIAS           (الاسم المستعار للمفتاح)
-#   • ANDROID_KEY_PASSWORD        (كلمة مرور المفتاح)
-#
-# 🚦 التشغيل:
-#   • Push إلى main/master → بناء تلقائي
-#   • Tag (v1.0.0) → بناء + Release على GitHub
-#   • Workflow Dispatch → بناء يدوي من Actions
-#
-# 📤 المخرجات:
-#   • starnote-debug-apk.apk      (لاختبار أثناء التطوير)
-#   • starnote-release-apk.apk    (للتوزيع المباشر)
-#   • starnote-release.aab        (لـ Google Play Store)
-#
-# ═══════════════════════════════════════════════════════════════════════════════
 
 name: 🤖 StarNote Android Build
 
