@@ -159,29 +159,50 @@ jobs:
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
                   addPage()
-                  val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFFF1F3F8.toInt()) }
-                  val top = row()
-                  listOf("📚" to { menu() }, "📄" to { chooseImage(101) }, "🖼️" to { backgroundMenu() }, "📤" to { exportPdf() }, "💾" to { save() }).forEach { (icon, action) -> top.addView(button(icon, action), LinearLayout.LayoutParams(0, 48, 1f)) }
-                  root.addView(top)
-                  label = TextView(this).apply { text = "دفتر • صفحة 1"; gravity = Gravity.CENTER; textSize = 13f; setPadding(4, 5, 4, 5) }
-                  root.addView(label)
+                  window.statusBarColor = Color.rgb(43, 43, 43)
+                  window.navigationBarColor = Color.rgb(43, 43, 43)
+                  window.decorView.systemUiVisibility = 0
+                  val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF303030.toInt()) }
+                  val top = row().apply { setBackgroundColor(0xFF292929.toInt()); setPadding(2, 0, 2, 0) }
+                  val tools: List<Pair<String, () -> Unit>> = listOf(
+                      "◇" to { menu() }, "#" to { page = (page + 1).coerceAtMost(29); addPageIfNeeded(); update() },
+                      "▤" to { toast("أداة التحديد") }, "T" to { addText() }, "▧" to { backgroundMenu() },
+                      "◌" to { toast("أداة التحديد الحر") }, "◇" to { tool = 2; paper.invalidate() },
+                      "／" to { tool = 0; paper.invalidate() }, "✎" to { tool = 0; paper.invalidate() },
+                      "✒" to { tool = 1; paper.invalidate() }, "↶" to { undo() }, "↷" to { toast("لا توجد خطوة للإعادة") }
+                  )
+                  tools.forEachIndexed { index, item ->
+                      val b = button(item.first, item.second)
+                      b.textSize = if (index == 3) 19f else 22f
+                      b.setTextColor(if (index == 3) 0xFFBDEBFF.toInt() else 0xFFD0D0D0.toInt())
+                      b.background = android.graphics.drawable.GradientDrawable().apply {
+                          setColor(if (index == 3) 0xFF3B555D.toInt() else 0xFF292929.toInt())
+                          cornerRadius = 3f
+                      }
+                      top.addView(b, LinearLayout.LayoutParams(0, 44, 1f))
+                  }
+                  root.addView(top, LinearLayout.LayoutParams(-1, 44))
                   paper = PaperView()
                   root.addView(paper, LinearLayout.LayoutParams(-1, 0, 1f))
-                  val bottom = row()
-                  listOf("✍️" to { tool = 0 }, "🖍️" to { tool = 1 }, "🧽" to { tool = 2 }, "🔤" to { addText() }, "🎨" to { colors() }, "⚙️" to { settings() }, "↶" to { undo() }, "＋" to { addPage() }, "◀" to { page = max(0, page - 1); update() }, "▶" to { page++; addPageIfNeeded(); update() }).forEach { (icon, action) -> bottom.addView(button(icon, action), LinearLayout.LayoutParams(0, 48, 1f)) }
-                  root.addView(bottom)
+                  label = TextView(this).apply {
+                      text = "30/30"; gravity = Gravity.CENTER; textSize = 11f; setTextColor(0xFF777777.toInt())
+                      setPadding(16, 3, 16, 3)
+                      background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFFE2E2E2.toInt()); cornerRadius = 24f }
+                  }
+                  val footer = FrameLayout(this).apply { setBackgroundColor(0xFF303030.toInt()); addView(label, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)) }
+                  root.addView(footer, LinearLayout.LayoutParams(-1, 24))
                   setContentView(root)
               }
               private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(4, 4, 4, 4) }
               private fun button(icon: String, action: () -> Unit) = TextView(this).apply {
                   text = icon; textSize = 20f; gravity = Gravity.CENTER; contentDescription = icon
-                  background = android.graphics.drawable.GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 14f; setStroke(1, 0xFFE1E5ED.toInt()) }
-                  setPadding(3, 4, 3, 4); setOnClickListener { action() }
-                  (layoutParams as? LinearLayout.LayoutParams)?.setMargins(2, 2, 2, 2)
+                  background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF292929.toInt()); cornerRadius = 3f }
+                  setPadding(1, 2, 1, 2); setOnClickListener { action() }
+                  (layoutParams as? LinearLayout.LayoutParams)?.setMargins(1, 0, 1, 0)
               }
               private fun addPage() { pages.add(mutableListOf()); textPages.add(mutableListOf()) }
               private fun addPageIfNeeded() { while (pages.size <= page) addPage() }
-              private fun update() { addPageIfNeeded(); label.text = "$title • صفحة ${page + 1}/${pages.size}"; paper.invalidate() }
+              private fun update() { addPageIfNeeded(); label.text = "${page + 1}/${pages.size}"; paper.invalidate() }
               private fun menu() {
                   AlertDialog.Builder(this).setTitle("📚 دفتر").setItems(arrayOf("✏️ اسم الملاحظة", "📄 اختيار الغلاف", "📤 تصدير PDF", "💾 حفظ")) { _, i ->
                       when (i) {
@@ -317,7 +338,7 @@ jobs:
                   }
                   override fun onDraw(canvas: Canvas) {
                       super.onDraw(canvas)
-                      canvas.drawColor(0xFFEEF0F5.toInt())
+                      canvas.drawColor(0xFF303030.toInt())
                       val r = pageRect()
                       canvas.drawRect(r.left+2,r.top+3,r.right+2,r.bottom+3,Paint().apply { color=0x22000000 })
                       canvas.drawRect(r,Paint().apply { color=Color.WHITE })
