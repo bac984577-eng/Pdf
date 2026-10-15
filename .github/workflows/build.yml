@@ -18,12 +18,37 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: '12.0'
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+      - name: Configure Android SDK (use runner SDK; no Gradle cache scan)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -x "$SDK_ROOT/cmdline-tools/12.0/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/12.0/bin/sdkmanager"
+          else
+            echo "Android sdkmanager not found under $SDK_ROOT/cmdline-tools"
+            find "$SDK_ROOT" -path '*/bin/sdkmanager' -type f -print || true
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
+            'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
+          echo "PATH=$SDK_ROOT/platform-tools:$PATH" >> "$GITHUB_PATH"
+      - name: Install Gradle without scanning project cache files
+        shell: bash
+        run: |
+          set -euo pipefail
+          GRADLE_VERSION=8.7
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+            --output /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
+          /tmp/gradle-${GRADLE_VERSION}/bin/gradle --version
       - name: Generate project
         shell: bash
         run: |
@@ -349,7 +374,10 @@ jobs:
           }
           EOF
       - name: Build APK
-        run: gradle --no-daemon assembleDebug
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
