@@ -1,407 +1,112 @@
-name: Build Daftar Android APK
+# ─────────────────────────────────────────────────────────────
+#  مِداد — بناء تطبيق أندرويد (APK) عبر GitHub Actions
+#  يغلّف هذا السير تطبيق الويب داخل غلاف أندرويد أصلي (Capacitor).
+#
+#  ⚙️ خطوة واحدة مطلوبة قبل التشغيل:
+#  أضف Secret باسم APP_URL يحتوي رابط التطبيق المنشور
+#  (Settings → Secrets and variables → Actions → New repository secret)
+#  مثال:  https://midad.vercel.app
+# ─────────────────────────────────────────────────────────────
+name: 📱 بناء APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main, master]
-
-permissions:
-  contents: read
+    branches: [main]
+  workflow_dispatch: # تشغيل يدوي من تبويب Actions
 
 jobs:
-  build:
+  build-apk:
+    name: بناء APK وتوقيعه
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: 📥 سحب الكود
+        uses: actions/checkout@v4
+
+      - name: 🟢 Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: ☕ Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-      - name: Configure Android SDK (use runner SDK; no Gradle cache scan)
-        shell: bash
+          java-version: "17"
+
+      - name: 🤖 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 📦 تثبيت الحزم
+        run: npm ci
+
+      - name: 🛠️ تجهيز غلاف Capacitor
         run: |
-          set -euo pipefail
-          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=${ANDROID_HOME:-/usr/local/lib/android/sdk}" >> "$GITHUB_ENV"
-          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          elif [ -x "$SDK_ROOT/cmdline-tools/12.0/bin/sdkmanager" ]; then
-            SDKMANAGER="$SDK_ROOT/cmdline-tools/12.0/bin/sdkmanager"
-          else
-            echo "Android sdkmanager not found under $SDK_ROOT/cmdline-tools"
-            find "$SDK_ROOT" -path '*/bin/sdkmanager' -type f -print || true
-            exit 1
+          npm i -D @capacitor/cli @capacitor/core @capacitor/android
+          mkdir -p out
+          cp public/icon.svg out/icon.svg 2>/dev/null || true
+          npx cap add android
+          npx cap sync android
+        env:
+          CAPACITOR_CONFIG: "1"
+
+      - name: ⚙️ كتابة إعداد Capacitor برابط التطبيق
+        run: |
+          if [ -z "$APP_URL" ]; then
+            echo "⚠️ لم يُضبط APP_URL — سيبنى التطبيق بدون رابط (وضع العرض فقط)"
           fi
-          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
-            'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
-          echo "PATH=$SDK_ROOT/platform-tools:$PATH" >> "$GITHUB_PATH"
-      - name: Install Gradle without scanning project cache files
-        shell: bash
+          cat > capacitor.config.json <<EOF
+          {
+            "appId": "app.midad.notes",
+            "appName": "مِداد",
+            "webDir": "out",
+            "server": {
+              "url": "${APP_URL:-https://example.com}",
+              "cleartext": false,
+              "androidScheme": "https"
+            },
+            "android": { "allowMixedContent": false }
+          }
+          EOF
+          npx cap sync android
+
+      - name: 🔨 بناء APK (Debug — جاهز للتثبيت المباشر)
+        working-directory: android
         run: |
-          set -euo pipefail
-          GRADLE_VERSION=8.7
-          curl --fail --location --retry 3 --retry-delay 2 \
-            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-            --output /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-${GRADLE_VERSION}/bin" >> "$GITHUB_PATH"
-          /tmp/gradle-${GRADLE_VERSION}/bin/gradle --version
-      - name: Generate project
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p app/src/main/java/com/daftar/notes app/src/main/res/values
-          cat > settings.gradle.kts <<'EOF'
-          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories { google(); mavenCentral() }
-          }
-          rootProject.name = "Daftar"
-          include(":app")
-          EOF
-          cat > build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application") version "8.6.1" apply false
-              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
-          }
-          EOF
-          echo 'org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
-          android.useAndroidX=true
-          kotlin.code.style=official' > gradle.properties
-          cat > app/build.gradle.kts <<'EOF'
-          plugins {
-              id("com.android.application")
-              id("org.jetbrains.kotlin.android")
-          }
-          android {
-              namespace = "com.daftar.notes"
-              compileSdk = 35
-              defaultConfig {
-                  applicationId = "com.daftar.notes"
-                  minSdk = 26
-                  targetSdk = 35
-                  versionCode = 1
-                  versionName = "1.0"
-              }
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-              kotlinOptions { jvmTarget = "17" }
-          }
-          EOF
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application android:allowBackup="true" android:label="دفتر" android:theme="@style/AppTheme" android:supportsRtl="true">
-                  <activity android:name=".MainActivity" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN"/>
-                          <category android:name="android.intent.category.LAUNCHER"/>
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:colorAccent">#1976D2</item>
-                  <item name="android:statusBarColor">#F5F6FA</item>
-                  <item name="android:navigationBarColor">#F5F6FA</item>
-                  <item name="android:windowLightStatusBar">true</item>
-              </style>
-          </resources>
-          EOF
-          cat > app/src/main/java/com/daftar/notes/MainActivity.kt <<'EOF'
-          package com.daftar.notes
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
 
-          import android.app.*
-          import android.content.*
-          import android.graphics.*
-          import android.graphics.pdf.PdfDocument
-          import android.net.Uri
-          import android.os.Bundle
-          import android.view.*
-          import android.widget.*
-          import java.util.Locale
-          import kotlin.math.max
-          import kotlin.math.min
-
-          data class Stroke(val color: Int, val width: Float, val points: MutableList<PointF>)
-          data class TextItem(var value: String, var x: Float, var y: Float, var size: Float, var color: Int)
-
-          class MainActivity : Activity() {
-              private val pages = mutableListOf<MutableList<Stroke>>()
-              private val textPages = mutableListOf<MutableList<TextItem>>()
-              private var page = 0
-              private var tool = 0
-              private var ink = Color.BLACK
-              private var inkWidth = 4f
-              private var marker = Color.argb(100, 255, 230, 0)
-              private var markerWidth = 22f
-              private var eraserWidth = 28f
-              private var textColor = Color.rgb(30, 30, 30)
-              private var textSize = 22f
-              private var background: Uri? = null
-              private var backgroundAll = false
-              private var cover: Uri? = null
-              private var title = "ملاحظتي"
-              private var pendingPdf: PdfDocument? = null
-              private lateinit var paper: PaperView
-              private lateinit var label: TextView
-              private val palette = mutableListOf(Color.BLACK, Color.RED, Color.BLUE, Color.GREEN, Color.MAGENTA, Color.CYAN, 0xFFFF9800.toInt())
-
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  addPage()
-                  window.statusBarColor = Color.rgb(43, 43, 43)
-                  window.navigationBarColor = Color.rgb(43, 43, 43)
-                  window.decorView.systemUiVisibility = 0
-                  val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(0xFF303030.toInt()) }
-                  val top = row().apply { setBackgroundColor(0xFF292929.toInt()); setPadding(2, 0, 2, 0) }
-                  val tools: List<Pair<String, () -> Unit>> = listOf(
-                      "◇" to { menu() }, "#" to { page = (page + 1).coerceAtMost(29); addPageIfNeeded(); update() },
-                      "▤" to { toast("أداة التحديد") }, "T" to { addText() }, "▧" to { backgroundMenu() },
-                      "◌" to { toast("أداة التحديد الحر") }, "◇" to { tool = 2; paper.invalidate() },
-                      "／" to { tool = 0; paper.invalidate() }, "✎" to { tool = 0; paper.invalidate() },
-                      "✒" to { tool = 1; paper.invalidate() }, "↶" to { undo() }, "↷" to { toast("لا توجد خطوة للإعادة") }
-                  )
-                  tools.forEachIndexed { index, item ->
-                      val b = button(item.first, item.second)
-                      b.textSize = if (index == 3) 19f else 22f
-                      b.setTextColor(if (index == 3) 0xFFBDEBFF.toInt() else 0xFFD0D0D0.toInt())
-                      b.background = android.graphics.drawable.GradientDrawable().apply {
-                          setColor(if (index == 3) 0xFF3B555D.toInt() else 0xFF292929.toInt())
-                          cornerRadius = 3f
-                      }
-                      top.addView(b, LinearLayout.LayoutParams(0, 44, 1f))
-                  }
-                  root.addView(top, LinearLayout.LayoutParams(-1, 44))
-                  paper = PaperView()
-                  root.addView(paper, LinearLayout.LayoutParams(-1, 0, 1f))
-                  label = TextView(this).apply {
-                      text = "30/30"; gravity = Gravity.CENTER; textSize = 11f; setTextColor(0xFF777777.toInt())
-                      setPadding(16, 3, 16, 3)
-                      background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFFE2E2E2.toInt()); cornerRadius = 24f }
-                  }
-                  val footer = FrameLayout(this).apply { setBackgroundColor(0xFF303030.toInt()); addView(label, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER)) }
-                  root.addView(footer, LinearLayout.LayoutParams(-1, 24))
-                  setContentView(root)
-              }
-              private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(4, 4, 4, 4) }
-              private fun button(icon: String, action: () -> Unit) = TextView(this).apply {
-                  text = icon; textSize = 20f; gravity = Gravity.CENTER; contentDescription = icon
-                  background = android.graphics.drawable.GradientDrawable().apply { setColor(0xFF292929.toInt()); cornerRadius = 3f }
-                  setPadding(1, 2, 1, 2); setOnClickListener { action() }
-                  (layoutParams as? LinearLayout.LayoutParams)?.setMargins(1, 0, 1, 0)
-              }
-              private fun addPage() { pages.add(mutableListOf()); textPages.add(mutableListOf()) }
-              private fun addPageIfNeeded() { while (pages.size <= page) addPage() }
-              private fun update() { addPageIfNeeded(); label.text = "${page + 1}/${pages.size}"; paper.invalidate() }
-              private fun menu() {
-                  AlertDialog.Builder(this).setTitle("📚 دفتر").setItems(arrayOf("✏️ اسم الملاحظة", "📄 اختيار الغلاف", "📤 تصدير PDF", "💾 حفظ")) { _, i ->
-                      when (i) {
-                          0 -> { val input = EditText(this).apply { setText(title) }; AlertDialog.Builder(this).setTitle("اسم الملاحظة").setView(input).setPositiveButton("حفظ") { _, _ -> title = input.text.toString().ifBlank { "ملاحظتي" }; update() }.setNegativeButton("إلغاء", null).show() }
-                          1 -> chooseImage(101)
-                          2 -> exportPdf()
-                          3 -> save()
-                      }
-                  }.show()
-              }
-              private fun backgroundMenu() {
-                  AlertDialog.Builder(this).setTitle("🖼️ الخلفية").setItems(arrayOf("هذه الصفحة", "كل الصفحات")) { _, i ->
-                      backgroundAll = i == 1
-                      chooseImage(102)
-                  }.show()
-              }
-              private fun chooseImage(code: Int) {
-                  val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { type = "image/*"; addCategory(Intent.CATEGORY_OPENABLE) }
-                  startActivityForResult(intent, code)
-              }
-              @Deprecated("Deprecated in Android API")
-              override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-                  super.onActivityResult(requestCode, resultCode, data)
-                  if (resultCode != RESULT_OK || data?.data == null) return
-                  val uri = data.data!!
-                  if (requestCode == 103) {
-                      try { contentResolver.openOutputStream(uri)?.use { pendingPdf?.writeTo(it) }; pendingPdf?.close(); pendingPdf = null; Toast.makeText(this, "تم تصدير PDF", Toast.LENGTH_SHORT).show() }
-                      catch (e: Exception) { Toast.makeText(this, "تعذر حفظ PDF: ${e.message}", Toast.LENGTH_LONG).show() }
-                      return
-                  }
-                  try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
-                  if (requestCode == 101) { cover = uri; Toast.makeText(this, "تم اختيار الغلاف", Toast.LENGTH_SHORT).show() }
-                  if (requestCode == 102) { background = uri; paper.invalidate(); Toast.makeText(this, "تم اختيار الخلفية", Toast.LENGTH_SHORT).show() }
-              }
-              private fun colors() {
-                  val names = arrayOf("أسود", "أحمر", "أزرق", "أخضر", "أرجواني", "سماوي", "برتقالي", "＋ لون مخصص")
-                  AlertDialog.Builder(this).setTitle("🎨 الألوان").setItems(names) { _, i ->
-                      if (i == 7) {
-                          val input = EditText(this).apply { setText("#3366FF"); hint = "#RRGGBB" }
-                          AlertDialog.Builder(this).setTitle("＋ لون").setView(input).setPositiveButton("إضافة") { _, _ ->
-                              try { val c = Color.parseColor(input.text.toString()); palette.add(c); setColor(c) } catch (_: Exception) { toast("لون غير صالح") }
-                          }.setNegativeButton("إلغاء", null).show()
-                      } else setColor(palette[i])
-                  }.show()
-              }
-              private fun setColor(c: Int) {
-                  when (tool) { 0 -> ink = c; 1 -> marker = Color.argb(100, Color.red(c), Color.green(c), Color.blue(c)); else -> textColor = c }
-                  paper.invalidate()
-              }
-              private fun settings() {
-                  val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 8, 24, 0) }
-                  val width = EditText(this).apply { inputType = 2; setText((when(tool){0->inkWidth;1->markerWidth;else->eraserWidth}).toInt().toString()); hint = "الحجم والسمك" }
-                  val size = EditText(this).apply { inputType = 2; setText(textSize.toInt().toString()); hint = "حجم النص" }
-                  box.addView(TextView(this).apply { text = "حجم الأداة" }); box.addView(width)
-                  box.addView(TextView(this).apply { text = "حجم النص" }); box.addView(size)
-                  AlertDialog.Builder(this).setTitle("⚙️ الخصائص").setView(box).setPositiveButton("تطبيق") { _, _ ->
-                      val w = width.text.toString().toFloatOrNull()?.coerceIn(1f, 90f)
-                      if (w != null) when(tool) { 0 -> inkWidth = w; 1 -> markerWidth = w; else -> eraserWidth = w }
-                      textSize = size.text.toString().toFloatOrNull()?.coerceIn(8f, 100f) ?: textSize
-                      paper.invalidate()
-                  }.setNegativeButton("إلغاء", null).show()
-              }
-              private fun addText() {
-                  val input = EditText(this).apply { hint = "اكتب النص"; minLines = 2; gravity = Gravity.TOP or Gravity.RIGHT }
-                  AlertDialog.Builder(this).setTitle("🔤 نص جديد").setView(input).setPositiveButton("إضافة") { _, _ ->
-                      if (input.text.isNotBlank()) { textPages[page].add(TextItem(input.text.toString(), 60f, 100f, textSize, textColor)); paper.invalidate() }
-                  }.setNeutralButton("خط/حجم/لون") { _, _ -> settings() }.setNegativeButton("إلغاء", null).show()
-              }
-              private fun editText(t: TextItem) {
-                  val input = EditText(this).apply { setText(t.value); minLines = 2; gravity = Gravity.TOP or Gravity.RIGHT }
-                  AlertDialog.Builder(this).setTitle("تحرير النص").setView(input).setPositiveButton("حفظ") { _, _ -> t.value = input.text.toString(); paper.invalidate(); save() }
-                      .setNeutralButton("حذف") { _, _ -> textPages[page].remove(t); paper.invalidate(); save() }.setNegativeButton("إلغاء", null).show()
-              }
-              private fun undo() {
-                  val list = pages[page]
-                  if (list.isNotEmpty()) list.removeAt(list.lastIndex) else toast("لا توجد كتابة للتراجع")
-                  paper.invalidate(); save()
-              }
-              private fun save() {
-                  try {
-                      val f = java.io.File(filesDir, "daftar-note.txt")
-                      f.writeText("Daftar\n$title\npages=${pages.size}\nink=${pages.sumOf { it.size }}\ntext=${textPages.sumOf { it.size }}")
-                      toast("تم الحفظ محليًا")
-                  } catch (_: Exception) { toast("تعذر الحفظ") }
-              }
-              private fun exportPdf() {
-                  try {
-                      val pdf = PdfDocument()
-                      pages.forEachIndexed { i, strokes ->
-                          val info = PdfDocument.PageInfo.Builder(595, 842, i + 1).create()
-                          val p = pdf.startPage(info)
-                          p.canvas.drawColor(Color.WHITE)
-                          drawContents(p.canvas, strokes, textPages[i], 595f, 842f)
-                          pdf.finishPage(p)
-                      }
-                      pendingPdf = pdf
-                      val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                          addCategory(Intent.CATEGORY_OPENABLE); type = "application/pdf"
-                          putExtra(Intent.EXTRA_TITLE, title.replace(Regex("[^\\p{L}\\p{N}_-]"), "_") + ".pdf")
-                      }
-                      startActivityForResult(intent, 103)
-                  } catch (e: Exception) { toast("فشل التصدير: ${e.message}") }
-              }
-              private fun drawContents(c: Canvas, strokes: List<Stroke>, texts: List<TextItem>, w: Float, h: Float) {
-                  strokes.forEach { s ->
-                      val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color=s.color; strokeWidth=s.width; style=Paint.Style.STROKE; strokeCap=Paint.Cap.ROUND; strokeJoin=Paint.Join.ROUND }
-                      if (s.points.size == 1) c.drawCircle(s.points[0].x,s.points[0].y,s.width/2,p)
-                      for (i in 1 until s.points.size) c.drawLine(s.points[i-1].x,s.points[i-1].y,s.points[i].x,s.points[i].y,p)
-                  }
-                  texts.forEach { t ->
-                      val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color=t.color; textSize=t.size }
-                      t.value.split("\n").forEachIndexed { i, line -> c.drawText(line,t.x,t.y+i*t.size*1.25f,p) }
-                  }
-              }
-              private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-
-              inner class PaperView : View(this@MainActivity) {
-                  private var active: Stroke? = null
-                  private var selected: TextItem? = null
-                  private var moveText = false
-                  private var lastTap = 0L
-                  private var lastX = 0f
-                  private var lastY = 0f
-                  private val margin = 12f
-                  private fun pageRect(): RectF {
-                      val w = width - margin * 2
-                      val h = min(height - 6f, w * 842f / 595f)
-                      return RectF(margin, 3f, margin + w, 3f + h)
-                  }
-                  private fun coords(x: Float, y: Float): PointF {
-                      val r = pageRect()
-                      return PointF(((x-r.left)/r.width()*595f).coerceIn(0f,595f), ((y-r.top)/r.height()*842f).coerceIn(0f,842f))
-                  }
-                  override fun onDraw(canvas: Canvas) {
-                      super.onDraw(canvas)
-                      canvas.drawColor(0xFF303030.toInt())
-                      val r = pageRect()
-                      canvas.drawRect(r.left+2,r.top+3,r.right+2,r.bottom+3,Paint().apply { color=0x22000000 })
-                      canvas.drawRect(r,Paint().apply { color=Color.WHITE })
-                      canvas.save()
-                      canvas.translate(r.left,r.top)
-                      canvas.scale(r.width()/595f,r.height()/842f)
-                      if (this@MainActivity.background != null && (backgroundAll || page == 0)) {
-                          try { contentResolver.openInputStream(this@MainActivity.background!!)?.use { android.graphics.BitmapFactory.decodeStream(it)?.let { b -> canvas.drawBitmap(b,null,RectF(0f,0f,595f,842f),Paint(Paint.ANTI_ALIAS_FLAG)) } } } catch (_: Exception) {}
-                      }
-                      drawContents(canvas,pages[page],textPages[page],595f,842f)
-                      selected?.let { t ->
-                          val p=Paint().apply { textSize=t.size }
-                          canvas.drawRect(t.x-5,t.y-t.size,t.x+max(80f,p.measureText(t.value.take(30))+10),t.y+t.size*1.5f,Paint().apply { color=0xFF1976D2.toInt(); style=Paint.Style.STROKE; strokeWidth=1.5f })
-                      }
-                      canvas.restore()
-                  }
-                  override fun onTouchEvent(e: MotionEvent): Boolean {
-                      val p = coords(e.x,e.y)
-                      when(e.actionMasked) {
-                          MotionEvent.ACTION_DOWN -> {
-                              lastX=e.x; lastY=e.y
-                              val hit=textPages[page].asReversed().firstOrNull { t -> p.x>=t.x-8 && p.x<=t.x+max(80f,t.value.length*t.size*.65f) && p.y>=t.y-t.size && p.y<=t.y+t.size*1.5f }
-                              if(hit!=null) {
-                                  val now=System.currentTimeMillis()
-                                  if(selected===hit && now-lastTap<450) editText(hit)
-                                  selected=hit; lastTap=now; moveText=true; invalidate(); return true
-                              }
-                              selected=null
-                              if(tool==2) erase(p) else {
-                                  val color=if(tool==1) marker else ink
-                                  val width=if(tool==1) markerWidth else inkWidth
-                                  active=Stroke(color,width, mutableListOf(p)); pages[page].add(active!!)
-                              }
-                              invalidate(); return true
-                          }
-                          MotionEvent.ACTION_MOVE -> {
-                              if(moveText && selected!=null) {
-                                  val t=selected!!
-                                  val dx=(e.x-lastX)/pageRect().width()*595f
-                                  val dy=(e.y-lastY)/pageRect().height()*842f
-                                  t.x=(t.x+dx).coerceIn(0f,570f); t.y=(t.y+dy).coerceIn(20f,830f)
-                                  lastX=e.x; lastY=e.y
-                              } else if(tool==2) erase(p) else active?.points?.add(p)
-                              invalidate(); return true
-                          }
-                          MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { active=null; moveText=false; save(); invalidate(); return true }
-                      }
-                      return true
-                  }
-                  private fun erase(p: PointF) {
-                      pages[page].removeAll { s -> s.points.any { q -> kotlin.math.hypot((q.x-p.x).toDouble(),(q.y-p.y).toDouble()) < eraserWidth*2 } }
-                  }
-              }
-          }
-          EOF
-      - name: Build APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle --no-daemon --stacktrace assembleDebug
-      - name: Upload APK
+      - name: ⬆️ رفع ملف APK كمخرج (Artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: daftar-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          name: midad-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      # ── نسخة Release موقعة (اختياري) ──────────────────────
+      # فعّلها بإضافة الأسرار التالية في المستودع:
+      #   ANDROID_KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD
+      - name: 🔐 تجهيز التوقيع (اختياري)
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/keystore.jks
+
+      - name: 🏷️ بناء Release موقّع (اختياري)
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        working-directory: android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: ⬆️ رفع نسخة Release (اختياري)
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: midad-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
