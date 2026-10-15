@@ -324,8 +324,8 @@ jobs:
                       canvas.save()
                       canvas.translate(r.left,r.top)
                       canvas.scale(r.width()/595f,r.height()/842f)
-                      if (background != null && (backgroundAll || page == 0)) {
-                          try { contentResolver.openInputStream(background!!)?.use { android.graphics.BitmapFactory.decodeStream(it)?.let { b -> canvas.drawBitmap(b,null,RectF(0f,0f,595f,842f),Paint(Paint.ANTI_ALIAS_FLAG)) } } } catch (_: Exception) {}
+                      if (this@MainActivity.background != null && (backgroundAll || page == 0)) {
+                          try { contentResolver.openInputStream(this@MainActivity.background!!)?.use { android.graphics.BitmapFactory.decodeStream(it)?.let { b -> canvas.drawBitmap(b,null,RectF(0f,0f,595f,842f),Paint(Paint.ANTI_ALIAS_FLAG)) } } } catch (_: Exception) {}
                       }
                       drawContents(canvas,pages[page],textPages[page],595f,842f)
                       selected?.let { t ->
